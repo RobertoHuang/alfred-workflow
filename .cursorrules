@@ -1,0 +1,124 @@
+# ChangXianWorkflow - Cursor Rules
+
+## 项目概述
+
+这是一个 Alfred Workflow 项目
+使用 Python 实现动态模块加载的 Script Filter。项目采用插件化架构，支持通过命令行参数动态加载不同的工具模块
+
+## 项目架构
+
+### 核心组件
+
+1. **main.py** - 主入口文件
+   - `init()`: 动态加载模块
+   - `execute_module()`: 执行模块业务逻辑
+   - `handle_module_exception()`: 处理异常
+   - `entrance()`: 主入口函数
+
+2. **workflow.py** - Alfred Workflow 封装类
+   - `ChangXianWorkFlow`: 封装 Alfred Script Filter JSON 格式
+   - `add_item()`: 添加结果项
+   - `add_error_item()`: 添加错误项
+   - `send_feedback()`: 发送反馈给 Alfred
+
+3. **tools/** - 工具模块目录
+   - 每个模块都是一个独立的Python文件
+   - 模块通过点分路径动态加载（如 `tools.time`）
+
+4. **utils/** - 工具类目录
+   - `CacheUtils.py`: 缓存工具
+   - `LogUtils.py`: 日志工具
+
+## 模块接口规范
+每个工具模块（位于 `tools/` 目录）必须实现以下接口：
+
+### 必需方法
+
+```python
+def getData(args, workflow):
+    """
+    获取数据
+    
+    参数:
+        args: 参数列表（从 sys.argv[2:] 传入）
+        workflow: ChangXianWorkFlow 实例
+    
+    返回:
+        数据对象，如果无数据返回 None
+    """
+    pass
+
+def parseData(workflow, data, args):
+    """
+    解析数据并添加到 workflow
+    
+    参数:
+        workflow: ChangXianWorkFlow 实例
+        data: getData() 返回的数据
+        args: 参数列表
+    """
+    pass
+```
+
+### 可选方法
+
+```python
+def onException(args, workflow):
+    """
+    处理异常（可选）
+    
+    参数:
+        args: 参数列表
+        workflow: ChangXianWorkFlow 实例
+    """
+    pass
+
+def ifNoData(workflow, args):
+    """
+    数据为空时的处理（可选）
+    
+    参数:
+        workflow: ChangXianWorkFlow 实例
+        args: 参数列表
+    """
+    pass
+```
+
+## Alfred Workflow Script Filter JSON 格式
+
+### 支持的属性（Script Filters Results 模式）
+
+项目使用 **Script Filters Results** 模式，脚本负责处理搜索和过滤。
+
+#### 必需属性
+- `title`: 条目标题（必需）
+
+#### 强烈推荐属性
+- `subtitle`: 条目副标题
+- `arg`: 传递给下一个操作的参数
+- `valid`: 条目是否有效（默认 True）
+- `icon`: 条目图标对象
+
+#### 支持的属性格式
+
+```python
+# 基本用法
+workflow.add_item(
+    title="标题",
+    subtitle="副标题",
+    valid=True,
+    icon={"path": "./logo/icon.png"},
+    arg="参数值"
+)
+
+# 图标格式
+icon = {
+    "path": "./logo/clock.png"  # 相对路径
+}
+
+# 错误项
+workflow.add_error_item(
+    title="错误标题",
+    subtitle="错误描述"
+)
+```
