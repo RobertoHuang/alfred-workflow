@@ -1,8 +1,13 @@
 import json
 import os
+import sqlite3
+import shutil
+import hashlib
+from pathlib import Path
 
 # 图标路径常量
-BOOKMARK_ICON = {"path": "./logo/book_mark.png"}  # 可以后续替换为书签图标
+BOOKMARK_ICON = {"path": "./logo/book_mark.png"}  # 默认书签图标
+FAVICONS_CACHE_DIR = Path("logo/favicons")  # 图标缓存目录
 
 def getData(args, workflow):
     """
@@ -75,11 +80,14 @@ def parseData(workflow, data, args):
             subtitle_parts.append(url)
         subtitle = " | ".join(subtitle_parts) if subtitle_parts else "无 URL"
         
+        # 获取书签图标（如果存在）
+        icon = _get_favicon(url) or BOOKMARK_ICON
+        
         workflow.add_item(
             title=title,
             subtitle=subtitle,
             valid=True,
-            icon=BOOKMARK_ICON,
+            icon=icon,
             arg=url
         )
     
@@ -361,3 +369,111 @@ def _flatten_links(bookmarks, path=""):
     return links
 
 
+def _get_favicon(url):
+    """
+    获取书签的 favicon 图标
+    
+    参数:
+        url: 书签 URL
+    
+    返回:
+        图标字典 {"path": "图标路径"}，如果不存在返回 None
+    """
+    if not url:
+        return None
+    
+    try:
+        # 确保缓存目录存在
+        FAVICONS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        
+        # 使用 URL 的哈希值作为文件名
+        url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()
+        icon_path = FAVICONS_CACHE_DIR / f"{url_hash}.png"
+        
+        # 如果缓存中已存在，直接返回（使用相对路径格式）
+        if icon_path.exists():
+            return {"path": f"./{icon_path}"}
+        
+        # 尝试从 Chrome Favicons 数据库提取
+        icon_data = _extract_local_icon(url)
+        
+        if icon_data:
+            # 保存到缓存目录
+            with open(icon_path, "wb") as f:
+                f.write(icon_data)
+            return {"path": f"./{icon_path}"}
+        
+        return None
+    except Exception:
+        # 发生任何错误都返回 None，使用默认图标
+        return None
+
+
+def _extract_local_icon(url):
+    """
+    从 Chrome Favicons 数据库提取图标
+    
+    参数:
+        url: 书签 URL
+    
+    返回:
+        图标二进制数据，如果不存在返回 None
+    """
+    try:
+        # 获取 Chrome 配置目录路径
+        home = os.path.expanduser("~")
+        chrome_path = Path(home) / "Library/Application Support/Google/Chrome/Default"
+        favicons_db = chrome_path / "Favicons"
+        
+        if not favicons_db.exists():
+            return None
+        
+        # 复制数据库文件以避免锁定（Chrome 可能正在使用）
+        temp_db = "temp_favicons.db"
+        wal_file = chrome_path / "Favicons-wal"
+        
+        # 复制主数据库文件
+        shutil.copy2(favicons_db, temp_db)
+        
+        # 如果存在 WAL 文件，也复制（可能包含未提交的图标数据）
+        if wal_file.exists():
+            shutil.copy2(wal_file, "temp_favicons.db-wal")
+        
+        # 连接数据库
+        conn = sqlite3.connect(temp_db)
+        cursor = conn.cursor()
+        
+        # 提取根域名，用于前缀匹配
+        domain = "/".join(url.split("/")[:3]) + "%"
+        
+        # 查询图标数据
+        query = """
+        SELECT b.image_data 
+        FROM favicon_bitmaps b
+        JOIN icon_mapping m ON m.icon_id = b.icon_id
+        WHERE m.page_url = ? OR m.page_url LIKE ?
+        ORDER BY b.width DESC LIMIT 1
+        """
+        
+        try:
+            # 先试精确匹配，再试域名匹配
+            cursor.execute(query, (url, domain))
+            result = cursor.fetchone()
+            icon_data = result[0] if result else None
+        except sqlite3.Error:
+            icon_data = None
+        finally:
+            conn.close()
+        
+        # 清理临时文件
+        for f in [temp_db, "temp_favicons.db-wal"]:
+            if os.path.exists(f):
+                try:
+                    os.remove(f)
+                except:
+                    pass
+        
+        return icon_data
+    except Exception:
+        # 发生任何错误都返回 None
+        return None
